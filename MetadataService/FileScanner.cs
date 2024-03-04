@@ -1,67 +1,75 @@
 ﻿using System.Text.Json;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace MetadataService;
 
-public class FileScanner
+public class FileScanner :BackgroundService
 {
-    //путь к папке сканирования
-    private readonly string? _directoryPath;
-    //маска файла
-    private readonly string? _searchPattern;
-    //интервал опроса каталога
-    private readonly TimeSpan _interval;
-
-    private List<FileData> _files;
+    //параметры из файла конфигурации
+    private readonly FileScannerOptions _options;
+    //список файлов
+    private readonly List<FileData> _files;
     
     // Конструктор
-    public FileScanner(IConfiguration configuration)
+    public FileScanner(IOptions<FileScannerOptions> options)
     {
-        _directoryPath = configuration.GetValue<string>("FileScanner:Path");
-        _searchPattern = configuration.GetValue<string>("FileScanner:SearchPattern");
-        _interval = TimeSpan.FromSeconds(configuration.GetValue<int>("FileScanner:Interval"));
+        _options = options.Value;
         _files = new List<FileData>();
     }
-    
-    // Сканирование файлов
-    public async Task ScanFilesAsync()
+    //сканирование фалла
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        while (true)
+        while (!stoppingToken.IsCancellationRequested)
         {
-            if (_directoryPath != null && _searchPattern!=null)
+            try
             {
-                try
+                if (_options.Path != null && _options.SearchPattern != null)
                 {
-                    var files = Directory.GetFiles(_directoryPath, _searchPattern);
-                    Console.WriteLine($"Найдено {files.Length} файлов");
-                    foreach (var file in files)
-                    {
-                        var fileData = await ReadFileDataAsync(file);
-                        SeekFileChanges(fileData);
-                        Console.WriteLine(
-                            $"File:{fileData.FileName}," +
-                            $"Content:{fileData.FileHash}"
-                            );
-                    }
-                }
-                catch (Exception exception)
-                {
-                    Console.WriteLine(exception.Message);
+                    GetSearchedFiles();
                 }
             }
-            await Task.Delay(_interval);
+            catch (Exception e)
+            {
+                Console.WriteLine(e.Message);
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(_options.Interval), stoppingToken);
         }
     }
-
-    private void SeekFileChanges(FileData fileData)
+    //получение найденных файлов
+    private async void GetSearchedFiles()
     {
-        var f = _files.Find(x => 
-            x.FileName.Equals(
+            var files = Directory.GetFiles(_options.Path, _options.SearchPattern);
+            Console.WriteLine($"Найдено {files.Length} файлов");
+            foreach (var file in files)
+            {
+                var fileData = await ReadFileDataAsync(file);
+                FindFileChanges(fileData);
+                Console.WriteLine
+                (
+                    $"File:{fileData.FileName},"+
+                    $"Hash:{fileData.FileHash}"
+                );
+            }
+    }
+    //поиск изменений в файле
+    private void FindFileChanges(FileData fileData)
+    {
+        var f = _files.Find
+        (x => 
+            x.FileName.Equals
+            (
                 fileData.FileName,
-                StringComparison.CurrentCultureIgnoreCase)
+                StringComparison.CurrentCultureIgnoreCase
+            )    
         );
-        if(f==null)
+        if (f == null)
+        {
             _files.Add(fileData);
+        }
         else
         {
             if (f.FileHash != fileData.FileHash)
@@ -74,7 +82,8 @@ public class FileScanner
     //чтение содержимого файла
     private static async Task<FileData> ReadFileDataAsync(string filePath)
     {
-            await using var fileStream = new FileStream(
+            await using var fileStream = new FileStream
+            (
                 filePath,
                 FileMode.Open,
                 FileAccess.Read
@@ -89,4 +98,6 @@ public class FileScanner
             };
             return fileData;
     }
+
+   
 }

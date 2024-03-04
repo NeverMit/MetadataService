@@ -2,6 +2,8 @@
 
 public class FileData
 {
-    public string FileName { get; set; }
+    //имя файла
+    public string FileName { get; set; } 
+    //хеш-код данных файла
     public int FileHash { get; set; }
 }
